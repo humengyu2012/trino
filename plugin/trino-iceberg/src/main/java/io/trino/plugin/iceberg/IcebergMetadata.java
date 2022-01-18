@@ -115,6 +115,7 @@ import static io.trino.plugin.iceberg.IcebergErrorCode.ICEBERG_INVALID_METADATA;
 import static io.trino.plugin.iceberg.IcebergSessionProperties.isProjectionPushdownEnabled;
 import static io.trino.plugin.iceberg.IcebergSessionProperties.isStatisticsEnabled;
 import static io.trino.plugin.iceberg.IcebergTableProperties.FILE_FORMAT_PROPERTY;
+import static io.trino.plugin.iceberg.IcebergTableProperties.IDENTIFIER_FIELD_NAMES_PROPERTY;
 import static io.trino.plugin.iceberg.IcebergTableProperties.LOCATION_PROPERTY;
 import static io.trino.plugin.iceberg.IcebergTableProperties.PARTITIONING_PROPERTY;
 import static io.trino.plugin.iceberg.IcebergTableProperties.getPartitioning;
@@ -430,7 +431,9 @@ public class IcebergMetadata
     @Override
     public Optional<ConnectorNewTableLayout> getNewTableLayout(ConnectorSession session, ConnectorTableMetadata tableMetadata)
     {
-        Schema schema = toIcebergSchema(tableMetadata.getColumns());
+        Set<String> identifierFieldNames = IcebergTableProperties.getIdentifierFieldNames(
+                tableMetadata.getProperties());
+        Schema schema = toIcebergSchema(tableMetadata.getColumns(), identifierFieldNames);
         PartitionSpec partitionSpec = parsePartitionFields(schema, getPartitioning(tableMetadata.getProperties()));
         return getWriteLayout(schema, partitionSpec);
     }
@@ -770,6 +773,10 @@ public class IcebergMetadata
         if (!icebergTable.location().isEmpty()) {
             properties.put(LOCATION_PROPERTY, icebergTable.location());
         }
+
+        List<String> identifierFieldIds = Optional.ofNullable(icebergTable.schema().identifierFieldNames())
+                .map(ImmutableList::copyOf).orElseGet(ImmutableList::of);
+        properties.put(IDENTIFIER_FIELD_NAMES_PROPERTY, identifierFieldIds);
 
         return new ConnectorTableMetadata(table, columns, properties.build(), getTableComment(icebergTable));
     }

@@ -14,6 +14,7 @@
 package io.trino.plugin.iceberg;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import io.trino.spi.session.PropertyMetadata;
 import io.trino.spi.type.ArrayType;
 import org.apache.iceberg.FileFormat;
@@ -24,6 +25,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.trino.spi.session.PropertyMetadata.enumProperty;
@@ -36,6 +38,7 @@ public class IcebergTableProperties
     public static final String FILE_FORMAT_PROPERTY = "format";
     public static final String PARTITIONING_PROPERTY = "partitioning";
     public static final String LOCATION_PROPERTY = "location";
+    public static final String IDENTIFIER_FIELD_NAMES_PROPERTY = "identifier_field_names";
 
     private final List<PropertyMetadata<?>> tableProperties;
 
@@ -65,6 +68,15 @@ public class IcebergTableProperties
                         "File system location URI for the table",
                         null,
                         false))
+                .add(new PropertyMetadata<>(
+                        IDENTIFIER_FIELD_NAMES_PROPERTY,
+                        "Identifier field names corresponding to iceberg identifier-field-ids",
+                        new ArrayType(VARCHAR),
+                        List.class,
+                        ImmutableList.of(),
+                        false,
+                        value -> ImmutableSet.copyOf((Collection<?>) value).asList(),
+                        value -> ImmutableSet.copyOf((Collection<?>) value).asList()))
                 .build();
     }
 
@@ -88,5 +100,12 @@ public class IcebergTableProperties
     public static Optional<String> getTableLocation(Map<String, Object> tableProperties)
     {
         return Optional.ofNullable((String) tableProperties.get(LOCATION_PROPERTY));
+    }
+
+    @SuppressWarnings("unchecked")
+    public static Set<String> getIdentifierFieldNames(Map<String, Object> tableProperties)
+    {
+        return Optional.ofNullable((List<String>) tableProperties.get(IDENTIFIER_FIELD_NAMES_PROPERTY))
+                .map(ImmutableSet::copyOf).orElseGet(ImmutableSet::of);
     }
 }

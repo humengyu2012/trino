@@ -61,9 +61,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
@@ -100,6 +102,7 @@ import static java.lang.Float.floatToRawIntBits;
 import static java.lang.Float.parseFloat;
 import static java.lang.Long.parseLong;
 import static java.lang.String.format;
+import static java.util.Objects.requireNonNull;
 import static org.apache.iceberg.BaseMetastoreTableOperations.ICEBERG_TABLE_TYPE_VALUE;
 import static org.apache.iceberg.BaseMetastoreTableOperations.TABLE_TYPE_PROP;
 import static org.apache.iceberg.LocationProviders.locationsFor;
@@ -363,27 +366,43 @@ public final class IcebergUtil
         return locationsFor(tableLocation, storageProperties);
     }
 
-    public static Schema toIcebergSchema(List<ColumnMetadata> columns)
+    public static Set<Integer> toIdentifierFieldIdSet(List<NestedField> fields, Set<String> identifierFieldNames)
+    {
+        Map<String, Integer> nameAndId = fields.stream()
+                .collect(Collectors.toMap(NestedField::name, NestedField::fieldId));
+        return identifierFieldNames.stream()
+                .map(column -> requireNonNull(nameAndId.get(column),
+                        "Column: " + column + " does not exist in table"))
+                .collect(Collectors.toSet());
+    }
+
+    public static Schema toIcebergSchema(List<ColumnMetadata> columns, Set<String> identifierFieldNames)
     {
         List<NestedField> icebergColumns = new ArrayList<>();
         for (ColumnMetadata column : columns) {
             if (!column.isHidden()) {
                 int index = icebergColumns.size();
                 org.apache.iceberg.types.Type type = toIcebergType(column.getType());
-                NestedField field = NestedField.of(index, column.isNullable(), column.getName(), type, column.getComment());
+                boolean isOptional = column.isNullable() && !identifierFieldNames.contains(column.getName());
+                NestedField field = NestedField.of(index, isOptional, column.getName(), type,
+                        column.getComment());
                 icebergColumns.add(field);
             }
         }
         org.apache.iceberg.types.Type icebergSchema = StructType.of(icebergColumns);
+
         AtomicInteger nextFieldId = new AtomicInteger(1);
         icebergSchema = TypeUtil.assignFreshIds(icebergSchema, nextFieldId::getAndIncrement);
-        return new Schema(icebergSchema.asStructType().fields());
+        List<NestedField> fields = icebergSchema.asStructType().fields();
+        return new Schema(fields, toIdentifierFieldIdSet(fields, identifierFieldNames));
     }
 
     public static Transaction newCreateTableTransaction(TrinoCatalog catalog, ConnectorTableMetadata tableMetadata, ConnectorSession session)
     {
         SchemaTableName schemaTableName = tableMetadata.getTable();
-        Schema schema = toIcebergSchema(tableMetadata.getColumns());
+        Set<String> identifierFieldNames = IcebergTableProperties.getIdentifierFieldNames(
+                tableMetadata.getProperties());
+        Schema schema = toIcebergSchema(tableMetadata.getColumns(), identifierFieldNames);
         PartitionSpec partitionSpec = parsePartitionFields(schema, getPartitioning(tableMetadata.getProperties()));
         String targetPath = getTableLocation(tableMetadata.getProperties())
                 .orElseGet(() -> catalog.defaultTableLocation(session, schemaTableName));
